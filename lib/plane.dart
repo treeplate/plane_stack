@@ -106,14 +106,13 @@ List<List<bool>> displays = [
   ],
 ];
 
-class Plane extends CustomPainter {
+class Plane {
   Plane(this.display,this.display2);
   factory Plane.fromInt(int i) => Plane(displays[(i/10).truncate()], displays[i%10]);
   final List<bool> display;
   final List<bool> display2;
-
-  @override
-  void paint(Canvas canvas, Size size) {
+  static const double planeHeight = 60;
+  void paint(Canvas canvas, Size size, Offset offset) {
     int dN = 2;
     Size arcSize = Size(80, 80);
     double lineLength = dN * 40;
@@ -121,10 +120,10 @@ class Plane extends CustomPainter {
     double tailHeight = 20;
     Path path = Path();
     double planeWidth = arcSize.width * 3 / 2 + lineLength;
-    path.arcTo(Offset.zero & arcSize, pi, pi / 2, false);
-    path.lineTo(lineLength + arcSize.width, 0);
+    path.arcTo(offset & arcSize, pi, pi / 2, false);
+    path.lineTo(lineLength + arcSize.width + offset.dx, offset.dy);
     path.arcTo(
-        Offset(arcSize.width / 2 + lineLength, -arcSize.height / 2) & arcSize,
+        Offset(arcSize.width / 2 + lineLength + offset.dx, -arcSize.height / 2 + offset.dy) & arcSize,
         0,
         pi / 2,
         false);
@@ -133,19 +132,19 @@ class Plane extends CustomPainter {
       Vertices(
         VertexMode.triangles,
         [
-          Offset(planeWidth, 0),
-          Offset(planeWidth - tailWidth, 0),
-          Offset(planeWidth, -tailHeight),
+          Offset(planeWidth+offset.dx, offset.dy),
+          Offset(planeWidth - tailWidth + offset.dx, offset.dy),
+          Offset(planeWidth + offset.dx, -tailHeight + offset.dy),
         ],
       ),
       BlendMode.color,
       Paint()..color = Colors.white,
     );
-    double segmentX = arcSize.width / 2;
+    double segmentX = arcSize.width / 2 + offset.dx;
     //display
     List<bool> display = this.display.toList();
-    drawDisplay(canvas, segmentX, lineLength / 3, arcSize.height / 2, display);
-    drawDisplay(canvas, segmentX + lineLength * 2 / 3, lineLength / 3,
+    drawDisplay(canvas, segmentX, offset.dy, lineLength / 3, arcSize.height / 2, display);
+    drawDisplay(canvas, segmentX + lineLength * 2 / 3, offset.dy, lineLength / 3,
         arcSize.height / 2, display2.toList());
   }
 
@@ -167,28 +166,25 @@ class Plane extends CustomPainter {
     );
   }
 
-  @override
-  bool shouldRepaint(Plane oldDelegate) => display != oldDelegate.display;
-
-  void drawDisplay(Canvas canvas, double segmentX, double width, double height,
+  void drawDisplay(Canvas canvas, double segmentX, double originY, double width, double height,
       List<bool> display) {
-    if (display.first) drawHorizontalSegment(canvas, segmentX, 0, width);
+    if (display.first) drawHorizontalSegment(canvas, segmentX, originY, width);
     display.removeAt(0);
-    if (display.first) drawVerticalSegment(canvas, segmentX, 0, height / 2);
-    display.removeAt(0);
-    if (display.first)
-      drawVerticalSegment(canvas, segmentX + width, 0, height / 2);
+    if (display.first) drawVerticalSegment(canvas, segmentX, originY, height / 2);
     display.removeAt(0);
     if (display.first)
-      drawHorizontalSegment(canvas, segmentX, height / 2, width);
+      drawVerticalSegment(canvas, segmentX + width, originY, height / 2);
     display.removeAt(0);
     if (display.first)
-      drawVerticalSegment(canvas, segmentX, height / 2, height / 2);
+      drawHorizontalSegment(canvas, segmentX, height / 2 + originY, width);
     display.removeAt(0);
     if (display.first)
-      drawVerticalSegment(canvas, segmentX + width, height / 2, height / 2);
+      drawVerticalSegment(canvas, segmentX, height / 2 + originY, height / 2);
     display.removeAt(0);
-    if (display.first) drawHorizontalSegment(canvas, segmentX, height, width);
+    if (display.first)
+      drawVerticalSegment(canvas, segmentX + width, height / 2 + originY, height / 2);
+    display.removeAt(0);
+    if (display.first) drawHorizontalSegment(canvas, segmentX, height + originY, width);
     display.removeAt(0);
   }
 }
