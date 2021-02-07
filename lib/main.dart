@@ -29,6 +29,36 @@ class MyHomePage extends StatefulWidget {
 }
 
 class _MyHomePageState extends State<MyHomePage> {
+  List<int> stack = [3, 4, 2];
+  List<Instruction> instructionStack = [];
+  Map<String, int Function(List<int>)> boxes = {};
+
+  void executeNext() {
+    switch (instructionStack.first.input.runtimeType) {
+      case ConstantNumber:
+        handleBox(
+          instructionStack.first.boxName,
+          [(instructionStack.first.input as ConstantNumber).number],
+        );
+        break;
+      case FromStack:
+        handleBox(
+          instructionStack.first.boxName,
+          stack
+            ..getRange(
+              0,
+              (instructionStack.first.input as FromStack).amount,
+            )
+            ..removeRange(
+              0,
+              (instructionStack.first.input as FromStack).amount,
+            ),
+        );
+        break;
+    }
+    instructionStack.removeAt(0);
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -38,12 +68,12 @@ class _MyHomePageState extends State<MyHomePage> {
         child: ListView(
           scrollDirection: Axis.vertical,
           children: List.generate(
-            100,
+            stack.length,
             (int i) => Center(
               child: Container(
                 height: 100,
                 child: CustomPaint(
-                  painter: Plane.fromInt(i),
+                  painter: Plane.fromInt(stack[i]),
                 ),
               ),
             ),
@@ -52,7 +82,31 @@ class _MyHomePageState extends State<MyHomePage> {
       ),
     );
   }
+
+  void handleBox(String boxName, List<int> list) {
+    stack.insert(0, boxes[boxName]!(list));
+  }
 }
+
+class Instruction {
+  Instruction(this.boxName, this.input);
+  final String boxName;
+  final Input input;
+}
+
+abstract class Input {}
+
+class FromStack extends Input {
+  FromStack(this.amount);
+  final int amount;
+}
+
+class ConstantNumber extends Input {
+  ConstantNumber(this.number);
+  final int number;
+}
+
+class FromUser extends Input {}
 
 // Boxes: planes in, calculate stuff, planes out
 // Stack: planes in storage
