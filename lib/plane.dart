@@ -111,15 +111,15 @@ class Plane {
   factory Plane.fromInt(int i) => Plane(displays[(i/10).truncate()], displays[i%10]);
   final List<bool> display;
   final List<bool> display2;
-  static const double planeHeight = 60;
+  static double get height => arcSize.height/2 + tailHeight;
+  static const Size arcSize = Size(80, 80);
+  static const double lineLength = 80;
+  static const double tailWidth = 30;
+  static const double tailHeight = 20;
+  static double get planeWidth => arcSize.width * 3 / 2 + lineLength;
+
   void paint(Canvas canvas, Size size, Offset offset) {
-    int dN = 2;
-    Size arcSize = Size(80, 80);
-    double lineLength = dN * 40;
-    double tailWidth = 30;
-    double tailHeight = 20;
     Path path = Path();
-    double planeWidth = arcSize.width * 3 / 2 + lineLength;
     path.arcTo(offset & arcSize, pi, pi / 2, false);
     path.lineTo(lineLength + arcSize.width + offset.dx, offset.dy);
     path.arcTo(
