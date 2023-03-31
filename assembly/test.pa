@@ -1,0 +1,3 @@
+testBox istack
+testBox const 3
+testBox istack

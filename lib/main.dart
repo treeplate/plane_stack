@@ -1,10 +1,11 @@
-import 'dart:ui';
-
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
+import 'package:flutter/services.dart';
 
-import 'plane.dart';
 import 'dart:math';
+import 'PAParser.dart';
+import 'pa.dart';
+import 'plane.dart';
 
 void main() {
   print("1");
@@ -45,9 +46,7 @@ class _MyHomePageState extends State<MyHomePage>
   List<PositionedPlane> stack = [
     PositionedPlane(0, 0, 0),
   ];
-  List<Instruction> instructionStack = [
-    Instruction("testBox", FromStack(1)),
-  ];
+  List<Instruction>? instructionStack;
   Map<String, Box> boxes = {
     "testBox": Box("testBox", "Adds 10 to the first arg", boxA),
     //"testBox2": Box("testBox", "Adds 10 to the first arg", boxA),
@@ -63,35 +62,40 @@ class _MyHomePageState extends State<MyHomePage>
 
   void initState() {
     super.initState();
-    ticker = createTicker((elapsed) {
-      bool isPlanes = false;
-      List<PositionedPlane> planesAtPointFive = [];
-      setState(() {
-        print("Tick tick tick");
-        for (PositionedPlane plane in stack) {
-          bool lessThanHalf = false;
-          if (plane.t > 0 && plane.t < 1) {
-            lessThanHalf = plane.t < .5;
-            plane.t += 1 / 120;
-            if (plane.t > .5 && lessThanHalf) {
-              plane.t = .5;
+    () async {
+      instructionStack =
+          parsePA(await rootBundle.loadString('assembly/test.pa')).toList();
+      ticker = createTicker((elapsed) {
+        bool isPlanes = false;
+        List<PositionedPlane> planesAtPointFive = [];
+        setState(() {
+          print("Tick tick tick");
+          for (PositionedPlane plane in stack) {
+            bool lessThanHalf = false;
+            if (plane.t > 0 && plane.t < 1) {
+              lessThanHalf = plane.t < .5;
+              plane.t += 1 / 120;
+              if (plane.t > .5 && lessThanHalf) {
+                plane.t = .5;
+              }
             }
+            if (plane.t == .5) {
+              isPlanes = true;
+              planesAtPointFive.add(plane);
+            }
+            if (plane.t > 1) plane.t = 1;
           }
-          if (plane.t == .5) {
-            isPlanes = true;
-            planesAtPointFive.add(plane);
+          if (isPlanes) {
+            print("Plane!");
+            handleBox(boxes.keys.toList()[planesAtPointFive.first.boxPosition!],
+                planesAtPointFive.map((e) => e.displayN).toList());
+            for (PositionedPlane plane in planesAtPointFive)
+              stack.remove(plane);
           }
-          if (plane.t > 1) plane.t = 1;
-        }
-        if (isPlanes) {
-          print("Plane!");
-          handleBox(boxes.keys.toList()[planesAtPointFive.first.boxPosition!],
-              planesAtPointFive.map((e) => e.displayN).toList());
-          for (PositionedPlane plane in planesAtPointFive) stack.remove(plane);
-        }
-      });
-    })
-      ..start();
+        });
+      })
+        ..start();
+    }();
   }
 
   void dispose() {
@@ -100,30 +104,29 @@ class _MyHomePageState extends State<MyHomePage>
   }
 
   void executeNext() {
-    if (instructionStack.isEmpty) return;
-    switch (instructionStack.first.input.runtimeType) {
-      case ConstantNumber:
-        handleBox(
-          instructionStack.first.boxName,
-          [(instructionStack.first.input as ConstantNumber).number],
-        );
-        break;
-      case FromStack:
-        for (PositionedPlane plane in stack.getRange(
-          0,
-          (instructionStack.first.input as FromStack).amount,
-        )) {
+    if (instructionStack?.isEmpty ?? true) return;
+    for (Input input in instructionStack!.first.inputs) {
+      switch (input.runtimeType) {
+        case ConstantNumber:
+          handleBox(
+            instructionStack!.first.boxName,
+            [(input as ConstantNumber).number],
+          );
+          break;
+        case FromStack:
+          PositionedPlane plane = stack.first;
           plane.boxPosition =
-              boxes.keys.toList().indexOf(instructionStack.first.boxName);
+              boxes.keys.toList().indexOf(instructionStack!.first.boxName);
           plane.t = 1 / 120;
-        }
-        break;
+
+          break;
+      }
     }
-    //instructionStack.removeAt(0);
+    instructionStack!.removeAt(0);
   }
 
   Airport get airport => Airport(stack.toList(), boxes.values.toList(),
-      instructionStack.map((e) => e.toString()).toList());
+      instructionStack?.map((e) => e.toString()).toList() ?? ["loading..."]);
 
   @override
   Widget build(BuildContext context) {
@@ -134,12 +137,14 @@ class _MyHomePageState extends State<MyHomePage>
         child: ListBody(
           children: [
             TextButton(
-              onPressed: () => setState(executeNext),
+              onPressed: instructionStack?.isEmpty ?? true
+                  ? null
+                  : () => setState(executeNext),
               child: Container(
                 child: Padding(
                   padding: const EdgeInsets.all(8.0),
                   child: Text(
-                    "Execute next (${instructionStack.last})",
+                    "Execute next (${instructionStack?.isEmpty ?? true ? 'none' : instructionStack!.first})",
                     style: TextStyle(color: Colors.red),
                   ),
                 ),
@@ -271,31 +276,4 @@ class Airport extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant CustomPainter oldDelegate) => true;
-}
-
-class Instruction {
-  Instruction(this.boxName, this.input);
-  final String boxName;
-  final Input input;
-  String toString() => "$input => $boxName";
-}
-
-abstract class Input {}
-
-class FromStack extends Input {
-  FromStack(this.amount);
-  final int amount;
-  String toString() => "$amount planes from stack";
-}
-
-class ConstantNumber extends Input {
-  ConstantNumber(this.number);
-  final int number;
-  String toString() => "$number";
-}
-
-class FromUser extends Input {}
-
-int boxA(List<int> ints) {
-  return ints.first + 10;
 }
