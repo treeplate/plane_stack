@@ -1,3 +1,6 @@
-testBox istack
-testBox const 3
-testBox istack
+skip istack
+identity const 1
+copy istack
+add istack istack
+identity const 1
+loopback

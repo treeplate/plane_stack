@@ -1,0 +1,5 @@
+skip istack
+identity input NUMBERRRR
+add istack const 1
+identity const 1
+loopback

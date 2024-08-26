@@ -17,8 +17,9 @@ class ConstantNumber extends Input {
   String toString() => "$number";
 }
 
-class FromUser extends Input {}
+class FromUser extends Input {
+  String toString() => 'asking for $desc';
+  final String desc;
 
-int boxA(List<int> ints) {
-  return ints.first + 10;
+  FromUser(this.desc);
 }

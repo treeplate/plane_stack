@@ -1,6 +1,12 @@
+// TODO: redesign plane logic
+
+import 'dart:async';
+import 'dart:collection';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
+import 'package:numberpicker/numberpicker.dart';
 
 import 'dart:math';
 import 'PAParser.dart';
@@ -8,7 +14,6 @@ import 'pa.dart';
 import 'plane.dart';
 
 void main() {
-  print("1");
   runApp(MyApp());
 }
 
@@ -39,6 +44,8 @@ class PositionedPlane {
   double t;
   int? boxPosition;
   final int displayN;
+
+  String toString() => "(at $t) >$displayN> [$boxPosition]";
 }
 
 class _MyHomePageState extends State<MyHomePage>
@@ -46,55 +53,105 @@ class _MyHomePageState extends State<MyHomePage>
   List<PositionedPlane> stack = [
     PositionedPlane(0, 0, 0),
   ];
-  List<Instruction>? instructionStack;
-  Map<String, Box> boxes = {
-    "testBox": Box("testBox", "Adds 10 to the first arg", boxA),
-    //"testBox2": Box("testBox", "Adds 10 to the first arg", boxA),
-    //"testBox3": Box("testBox", "Adds 10 to the first arg", boxA),
-    //"testBox4": Box("testBox", "Adds 10 to the first arg", boxA),
-    //"testBox5": Box("testBox", "Adds 10 to the first arg", boxA),
-    //"testBox6": Box("testBox", "Adds 10 to the first arg", boxA),
-    //"testBox7": Box("testBox", "Adds 10 to the first arg", boxA),
-    //"testBox8": Box("testBox", "Adds 10 to the first arg", boxA),
-  };
+  bool loaded = false;
+  bool autoplay = false;
+  late List<Instruction> instructionStack;
+  late final List<Instruction> origInstructionStack;
+  Map<String, Box> boxes = LinkedHashMap.of({
+    "identity": Box(
+      "identity",
+      "Returns the input plane",
+      identity,
+      1,
+    ),
+    "add": Box(
+      "add",
+      "Adds the two input planes",
+      add,
+      2,
+    ),
+    "copy": Box(
+      "copy",
+      "Copies the input plane",
+      copy,
+      1,
+    ),
+    "delete": Box(
+      "delete",
+      "Deletes the input plane",
+      delete,
+      1,
+    ),
+    "loopback": Box(
+      "loopback",
+      "Jump to start. Returns input.",
+      identity, // special-cased in executeNext
+      0,
+    ),
+    "skip": Box(
+      "skip",
+      "Skip <input plane> instructions.",
+      delete, // special-cased in handleBox
+      1,
+    ),
+  });
 
   late Ticker ticker;
+  final List<PositionedPlane> waitingForClearance = [];
+  bool finishedBox = true;
 
   void initState() {
     super.initState();
     () async {
       instructionStack =
           parsePA(await rootBundle.loadString('assembly/test.pa')).toList();
+      origInstructionStack = instructionStack.toList();
       ticker = createTicker((elapsed) {
-        bool isPlanes = false;
         List<PositionedPlane> planesAtPointFive = [];
         setState(() {
-          print("Tick tick tick");
           for (PositionedPlane plane in stack) {
             bool lessThanHalf = false;
-            if (plane.t > 0 && plane.t < 1) {
+            if (plane.t > 1) plane.t = 1;
+            if (plane.t == 1) plane.t = 0;
+            if (plane.t > 0 && plane.t < 1 && plane.t != .5) {
               lessThanHalf = plane.t < .5;
               plane.t += 1 / 120;
+              if (plane.t > 1) plane.t = 1;
+              if (plane.t == 1) plane.t = 0;
               if (plane.t > .5 && lessThanHalf) {
                 plane.t = .5;
               }
+              if (plane.t == .5 || plane.t == 0) {
+                if (waitingForClearance.isNotEmpty) {
+                  waitingForClearance.removeAt(0).t += 1 / 120;
+                } else if (plane.t == 0) {
+                  finishedBox = true;
+                }
+              }
             }
-            if (plane.t == .5) {
-              isPlanes = true;
+            if (plane.t == .5 && !waitingForClearance.contains(plane)) {
               planesAtPointFive.add(plane);
             }
-            if (plane.t > 1) plane.t = 1;
           }
-          if (isPlanes) {
-            print("Plane!");
+          if (planesAtPointFive.length > 0 &&
+              planesAtPointFive.length ==
+                  boxes.values
+                      .toList()[planesAtPointFive.first.boxPosition!]
+                      .planeCountRequested) {
             handleBox(boxes.keys.toList()[planesAtPointFive.first.boxPosition!],
                 planesAtPointFive.map((e) => e.displayN).toList());
             for (PositionedPlane plane in planesAtPointFive)
               stack.remove(plane);
           }
+          if (finishedBox && autoplay && instructionStack.isNotEmpty) {
+            executeNext();
+          }
         });
       })
         ..start();
+      setState(() {
+        loaded = true;
+      });
     }();
   }
 
@@ -103,33 +160,60 @@ class _MyHomePageState extends State<MyHomePage>
     ticker.dispose();
   }
 
-  void executeNext() {
-    if (instructionStack?.isEmpty ?? true) return;
-    for (Input input in instructionStack!.first.inputs) {
+  void executeNext() async {
+    finishedBox = false;
+    if (instructionStack.isEmpty) return;
+    for (Input input in instructionStack.first.inputs) {
       switch (input.runtimeType) {
         case ConstantNumber:
-          handleBox(
-            instructionStack!.first.boxName,
-            [(input as ConstantNumber).number],
-          );
+          stack.add(PositionedPlane(
+              boxes.keys.toList().indexOf(instructionStack.first.boxName),
+              .5,
+              (input as ConstantNumber).number));
           break;
         case FromStack:
-          PositionedPlane plane = stack.first;
+          PositionedPlane plane = stack
+              .firstWhere((element) => !waitingForClearance.contains(element));
           plane.boxPosition =
-              boxes.keys.toList().indexOf(instructionStack!.first.boxName);
-          plane.t = 1 / 120;
+              boxes.keys.toList().indexOf(instructionStack.first.boxName);
+          print(plane);
+          waitingForClearance.add(plane);
 
+          break;
+        case FromUser:
+          stack.add(PositionedPlane(
+              boxes.keys.toList().indexOf(instructionStack.first.boxName),
+              .5,
+              await getNumberFromUser((input as FromUser).desc)));
           break;
       }
     }
-    instructionStack!.removeAt(0);
+    if (waitingForClearance.isNotEmpty) {
+      waitingForClearance.removeAt(0).t += 1 / 120;
+    }
+    if (boxes[instructionStack.first.boxName]!.planeCountRequested == 0) {
+      finishedBox = true;
+    }
+    if (instructionStack.first.boxName == 'loopback') {
+      instructionStack = origInstructionStack.toList();
+    } else {
+      instructionStack.removeAt(0);
+    }
+    setState(() {});
   }
 
   Airport get airport => Airport(stack.toList(), boxes.values.toList(),
-      instructionStack?.map((e) => e.toString()).toList() ?? ["loading..."]);
+      instructionStack.map((e) => e.toString()).toList());
 
   @override
   Widget build(BuildContext context) {
+    if (!loaded)
+      return Center(
+        child: Directionality(
+          textDirection: TextDirection.ltr,
+          child: Text('Loading...'),
+        ),
+      );
     return Scaffold(
       backgroundColor: Colors.blue,
       appBar: AppBar(title: Text("Planes")),
@@ -137,18 +221,25 @@ class _MyHomePageState extends State<MyHomePage>
         child: ListBody(
           children: [
             TextButton(
-              onPressed: instructionStack?.isEmpty ?? true
-                  ? null
-                  : () => setState(executeNext),
+              onPressed: () {
+                autoplay = !autoplay;
+              },
+              child: Container(
+                decoration: BoxDecoration(color: Colors.yellow),
+                child: Text('Turn autoplay ${autoplay ? 'off' : 'on'}'),
+              ),
+            ),
+            TextButton(
+              onPressed:
+                  instructionStack.isEmpty || !finishedBox ? null : executeNext,
               child: Container(
                 child: Padding(
                   padding: const EdgeInsets.all(8.0),
                   child: Text(
-                    "Execute next (${instructionStack?.isEmpty ?? true ? 'none' : instructionStack!.first})",
-                    style: TextStyle(color: Colors.red),
+                    "Execute next (${instructionStack.isEmpty ? 'none' : instructionStack.first})",
                   ),
                 ),
-                color: Colors.green,
+                decoration: BoxDecoration(color: Colors.yellow),
               ),
             ),
             Padding(
@@ -169,12 +260,99 @@ class _MyHomePageState extends State<MyHomePage>
   }
 
   void handleBox(String boxName, List<int> list) {
-    stack.insert(
-      0,
-      PositionedPlane(
-        boxes.keys.toList().indexOf(boxName),
-        61 / 120,
-        boxes[boxName]!.callback(list).clamp(0, 99),
+    List<int> result = boxes[boxName]!.callback(list);
+    for (int number in result) {
+      stack.insert(
+        0,
+        PositionedPlane(
+          boxes.keys.toList().indexOf(boxName),
+          .5,
+          number.clamp(0, 99),
+        ),
+      );
+      waitingForClearance.add(stack.first);
+    }
+    if (result.length == 0) finishedBox = true;
+    if (waitingForClearance.isNotEmpty) {
+      waitingForClearance.removeAt(0).t += 1 / 120;
+    }
+    if (boxName == 'skip') {
+      instructionStack.removeRange(0, list.first);
+    }
+  }
+
+  static List<int> identity(List<int> ints) {
+    return [ints.first];
+  }
+
+  static List<int> add(List<int> ints) {
+    return [ints.fold(0, (previousValue, element) => previousValue + element)];
+  }
+
+  static List<int> copy(List<int> ints) {
+    return [ints.first, ints.first];
+  }
+
+  static List<int> delete(List<int> ints) {
+    return [];
+  }
+
+  Future<int> getNumberFromUser(String message) async {
+    Completer<int> result = Completer();
+    int value = 50;
+    showDialog(
+      context: context,
+      builder: (context) {
+        return BoilerplateDialog(
+          title: message,
+          children: [
+            StatefulBuilder(builder: (context, setStateDialog) {
+              return NumberPicker(
+                minValue: 0,
+                maxValue: 99,
+                value: value,
+                onChanged: (v) {
+                  setStateDialog(() {
+                    value = v;
+                  });
+                },
+              );
+            }),
+            TextButton(
+              child: Text("Select number"),
+              onPressed: () {
+                result.complete(value);
+                Navigator.pop(context);
+              },
+            ),
+          ],
+        );
+      },
+    );
+    return result.future;
+  }
+}
+
+class BoilerplateDialog extends StatelessWidget {
+  final String title;
+  final List<Widget> children;
+
+  const BoilerplateDialog(
+      {super.key, required this.title, required this.children});
+  @override
+  Widget build(BuildContext context) {
+    return Dialog(
+      child: Padding(
+        padding: const EdgeInsets.all(8.0),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: <Widget>[
+            Text(title),
+            const SizedBox(height: 15),
+            ...children,
+          ],
+        ),
       ),
     );
   }
@@ -185,8 +363,10 @@ class Box {
 
   final String name;
 
-  Box(this.name, this.desc, this.callback);
-  int Function(List<int> ints) callback;
+  final int planeCountRequested;
+
+  Box(this.name, this.desc, this.callback, this.planeCountRequested);
+  List<int> Function(List<int> ints) callback;
 }
 
 class Airport extends CustomPainter {
@@ -205,47 +385,40 @@ class Airport extends CustomPainter {
       PositionedPlane plane = stack.last;
       if (plane.t == .5) {
         stack.removeLast();
-        n++;
+        //n++;
         continue;
       }
       Offset stackOffset = Offset(500, n * Plane.height);
       if (plane.t == 0 || plane.t == 1 || plane.boxPosition == null) {
-        stack.removeLast();
-        n++;
-        Plane.fromInt(plane.displayN).paint(canvas, size, stackOffset);
-        continue;
+        // stack.removeLast();
+        // n++;
+        // Plane.fromInt(plane.displayN).paint(canvas, size, stackOffset);
+        //  continue;
       }
       Offset boxOffset = Offset(0,
           (plane.boxPosition! * (Plane.height + 20)) + Plane.tailHeight + 10);
-      if (plane.t < .5) {
+      double planet = plane.t;
+      if (planet > .5) {
+        planet = 1 - planet;
+      }
+      if (planet < .5) {
         double straightLineLength = Plane.planeWidth + 20;
         Offset cornerOffset = boxOffset + Offset(straightLineLength, 0);
         Offset line = stackOffset - cornerOffset;
         double diagLineLength = line.distance;
         double percentDiag =
             diagLineLength / (diagLineLength + straightLineLength);
-        Offset position = Offset.lerp(
-            stackOffset, cornerOffset, (plane.t * 2) / percentDiag)!;
-        if (plane.t * 2 > percentDiag)
-          position = Offset.lerp(cornerOffset, boxOffset,
-              ((plane.t * 2) - percentDiag) / (1 - percentDiag))!;
-        Plane.fromInt(plane.displayN).paint(canvas, size, position);
-      }
-      if (plane.t > .5) {
-        //print(plane.t);
-        double r = 20;
-        Offset rDown = boxOffset.dy < stackOffset.dy
-            ? boxOffset - Offset(0, r)
-            : Offset(0, -r);
-        double h = (rDown - stackOffset).distance;
         Offset position =
-            Offset.lerp(boxOffset, stackOffset, (plane.t - 0.5) * 2)!;
+            Offset.lerp(stackOffset, cornerOffset, (planet * 2) / percentDiag)!;
+        if (planet * 2 > percentDiag)
+          position = Offset.lerp(cornerOffset, boxOffset,
+              ((planet * 2) - percentDiag) / (1 - percentDiag))!;
         Plane.fromInt(plane.displayN).paint(canvas, size, position);
       }
       stack.removeLast();
       n++;
     }
-    List<Box> boxes = this.boxes.toList();
+    List<Box> boxes = this.boxes.reversed.toList();
     n = 0;
     while (boxes.isNotEmpty) {
       TextPainter painter = TextPainter(

@@ -7,7 +7,7 @@ Lines are of the form: _box_ _input_* (seperated by spaces)<br>
 The result goes on the namesake, the plane stack.
 #### Boxes
 This is more commonly called an operation<br>
-Currently only one: `testBox` (adding 10 to the first argument)
+xxx boxes
 #### Inputs
 `istack`:<br>
 A plane from the plane stack.<br>

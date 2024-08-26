@@ -16,12 +16,14 @@ Iterable<Input> parsePAInputs(Iterator<String> parts) sync* {
         yield FromStack();
         break;
       case 'const':
-        parts.moveNext();
+        assert(parts.moveNext());
         int n = int.parse(parts.current);
         yield ConstantNumber(n);
         break;
       case 'input':
-        yield FromUser();
+        assert(parts.moveNext());
+        String desc = parts.current;
+        yield FromUser(desc);
         break;
     }
   }
